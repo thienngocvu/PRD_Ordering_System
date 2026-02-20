@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   LayoutDashboard,
@@ -14,8 +14,18 @@ import {
   LogOut,
   Menu,
   X,
-  Bell
+  Bell,
+  ChefHat,
+  User
 } from 'lucide-react'
+
+interface Notification {
+  id: string
+  message: string
+  type: 'order' | 'staff-call'
+  time: Date
+  read: boolean
+}
 
 const navItems = [
   { href: '/admin', label: 'Tổng quan', icon: LayoutDashboard },
@@ -31,20 +41,39 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const supabaseRef = useRef(createClient())
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [newOrderCount, setNewOrderCount] = useState(0)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [showNotifications, setShowNotifications] = useState(false)
+  const notificationPanelRef = useRef<HTMLDivElement>(null)
+
+  const addNotification = useCallback((message: string, type: 'order' | 'staff-call') => {
+    const notification: Notification = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      message,
+      type,
+      time: new Date(),
+      read: false,
+    }
+    setNotifications(prev => [notification, ...prev].slice(0, 50)) // Keep max 50
+  }, [])
 
   useEffect(() => {
     const supabase = supabaseRef.current
 
-    // Channel 1: Listen for new orders (postgres_changes)
+    // ⚡ Channel 1: Listen for new orders (postgres_changes)
+    // Chỉ lắng nghe INSERT thay vì * → giảm Realtime messages
     const ordersChannel = supabase
       .channel('admin-new-orders')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'orders' },
         (payload) => {
-          const newOrder = payload.new as { customer_name?: string; table_id?: number }
+          const newOrder = payload.new as { customer_name?: string; table_id?: number; created_by?: string }
+          // Không gửi thông báo cho đơn hàng tạo từ admin
+          if (newOrder.created_by === 'admin') return
           setNewOrderCount(prev => prev + 1)
-          toast(`🔔 Đơn hàng mới${newOrder.customer_name ? ` từ ${newOrder.customer_name}` : ''}!`, {
+          const message = `Đơn hàng mới${newOrder.customer_name ? ` từ ${newOrder.customer_name}` : ''}!`
+          addNotification(message, 'order')
+          toast(`🔔 ${message}`, {
             duration: 5000,
             style: {
               background: '#f97316',
@@ -60,11 +89,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           } catch {}
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime] orders channel:', status)
-      })
+      .subscribe()
 
-    // Channel 2: Listen for staff call broadcast
+    // ⚡ Channel 2: Listen for staff call broadcast
     const staffChannel = supabase
       .channel('staff-call')
       .on(
@@ -72,7 +99,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { event: 'call-staff' },
         (payload) => {
           const data = payload.payload as { tableName?: string; customerName?: string }
-          toast(`🔔 ${data.tableName || 'Có bàn'} đang gọi nhân viên!${data.customerName ? ` (${data.customerName})` : ''}`, {
+          const message = `${data.tableName || 'Có bàn'} đang gọi nhân viên!${data.customerName ? ` (${data.customerName})` : ''}`
+          addNotification(message, 'staff-call')
+          toast(`🔔 ${message}`, {
             duration: 8000,
             style: {
               background: '#3b82f6',
@@ -89,15 +118,67 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           } catch {}
         }
       )
-      .subscribe((status) => {
-        console.log('[Realtime] staff-call channel:', status)
-      })
+      .subscribe()
 
     return () => {
       supabase.removeChannel(ordersChannel)
       supabase.removeChannel(staffChannel)
     }
-  }, []) // Empty deps - supabaseRef.current never changes
+  }, [addNotification])
+
+  // Close notification panel when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (notificationPanelRef.current && !notificationPanelRef.current.contains(event.target as Node)) {
+        setShowNotifications(false)
+      }
+    }
+    if (showNotifications) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showNotifications])
+
+  const handleBellClick = () => {
+    setShowNotifications(prev => !prev)
+  }
+
+  const handleNotificationClick = (notification: Notification) => {
+    // Mark as read
+    setNotifications(prev =>
+      prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+    )
+    // Navigate to orders page for order notifications
+    if (notification.type === 'order') {
+      router.push('/admin/orders')
+    }
+    setShowNotifications(false)
+    setNewOrderCount(0)
+  }
+
+  const markAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    setNewOrderCount(0)
+  }
+
+  const clearAllNotifications = () => {
+    setNotifications([])
+    setNewOrderCount(0)
+    setShowNotifications(false)
+  }
+
+  const unreadCount = notifications.filter(n => !n.read).length
+
+  const formatTimeAgo = (date: Date) => {
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return 'Vừa xong'
+    if (diffMin < 60) return `${diffMin} phút trước`
+    const diffHr = Math.floor(diffMin / 60)
+    if (diffHr < 24) return `${diffHr} giờ trước`
+    return `${Math.floor(diffHr / 24)} ngày trước`
+  }
 
   const handleLogout = async () => {
     await supabaseRef.current.auth.signOut()
@@ -110,6 +191,92 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (href === '/admin') return pathname === '/admin'
     return pathname.startsWith(href)
   }
+
+  // Notification Panel Component
+  const NotificationPanel = () => (
+    <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-[60] animate-fade-in">
+      {/* Panel Header */}
+      <div className="px-4 py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-sm">Thông báo</h3>
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); markAllAsRead() }}
+                className="text-xs text-white/80 hover:text-white transition-colors underline underline-offset-2"
+              >
+                Đánh dấu đã đọc
+              </button>
+            )}
+            {notifications.length > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); clearAllNotifications() }}
+                className="text-xs text-white/80 hover:text-white transition-colors"
+                title="Xóa tất cả"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Notification List */}
+      <div className="max-h-80 overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="py-10 text-center">
+            <Bell className="w-10 h-10 text-slate-200 mx-auto mb-2" />
+            <p className="text-slate-400 text-sm">Chưa có thông báo nào</p>
+          </div>
+        ) : (
+          notifications.map(notification => (
+            <button
+              key={notification.id}
+              onClick={(e) => { e.stopPropagation(); handleNotificationClick(notification) }}
+              className={`w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors border-b border-slate-100 ${
+                !notification.read ? 'bg-orange-50/50' : ''
+              }`}
+            >
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                notification.type === 'order'
+                  ? 'bg-orange-100 text-orange-600'
+                  : 'bg-blue-100 text-blue-600'
+              }`}>
+                {notification.type === 'order' ? (
+                  <ChefHat className="w-4 h-4" />
+                ) : (
+                  <User className="w-4 h-4" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm ${!notification.read ? 'font-semibold text-slate-900' : 'text-slate-600'}`}>
+                  {notification.message}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">{formatTimeAgo(notification.time)}</p>
+              </div>
+              {!notification.read && (
+                <span className="w-2 h-2 bg-orange-500 rounded-full flex-shrink-0 mt-2" />
+              )}
+            </button>
+          ))
+        )}
+      </div>
+
+      {/* Panel Footer */}
+      {notifications.length > 0 && (
+        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-100">
+          <Link
+            href="/admin/orders"
+            onClick={() => { setShowNotifications(false); setNewOrderCount(0) }}
+            className="text-sm text-orange-600 hover:text-orange-700 font-semibold flex items-center justify-center gap-1 transition-colors"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Xem tất cả đơn hàng
+          </Link>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -124,13 +291,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
           <span className="font-bold text-slate-800">Quản trị</span>
         </div>
-        <div className="relative">
-          <Bell className="w-6 h-6 text-slate-600" />
-          {newOrderCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-              {newOrderCount}
-            </span>
-          )}
+        <div className="relative" ref={notificationPanelRef}>
+          <button
+            onClick={handleBellClick}
+            className="relative p-2 hover:bg-slate-100 rounded-xl transition-colors"
+            title="Xem thông báo"
+          >
+            <Bell className={`w-6 h-6 transition-colors ${unreadCount > 0 ? 'text-orange-500' : 'text-slate-600'}`} />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold animate-pulse">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+          {showNotifications && <NotificationPanel />}
         </div>
       </header>
 
@@ -160,6 +334,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 >
                   <item.icon className="w-5 h-5" />
                   {item.label}
+                  {item.href === '/admin/orders' && unreadCount > 0 && (
+                    <span className="ml-auto w-6 h-6 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>
@@ -192,16 +371,37 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               <item.icon className="w-5 h-5" />
               {item.label}
-              {item.href === '/admin/orders' && newOrderCount > 0 && (
+              {item.href === '/admin/orders' && unreadCount > 0 && (
                 <span className="ml-auto w-6 h-6 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
-                  {newOrderCount}
+                  {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </Link>
           ))}
         </nav>
 
-        <button onClick={handleLogout} className="sidebar-link text-red-500 hover:bg-red-50 hover:text-red-600 mt-4">
+        {/* Desktop Bell */}
+        <div className="relative mb-4" ref={showNotifications ? undefined : undefined}>
+          <button
+            onClick={handleBellClick}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors text-slate-600 hover:text-slate-800"
+          >
+            <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-orange-500' : ''}`} />
+            <span className="text-sm font-medium">Thông báo</span>
+            {unreadCount > 0 && (
+              <span className="ml-auto w-6 h-6 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold animate-pulse">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
+          {showNotifications && (
+            <div ref={notificationPanelRef} className="absolute left-full bottom-0 ml-2">
+              <NotificationPanel />
+            </div>
+          )}
+        </div>
+
+        <button onClick={handleLogout} className="sidebar-link text-red-500 hover:bg-red-50 hover:text-red-600 mt-2">
           <LogOut className="w-5 h-5" />
           Đăng xuất
         </button>

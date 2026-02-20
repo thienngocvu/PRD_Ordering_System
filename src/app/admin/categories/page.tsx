@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Category } from '@/lib/types'
 import toast from 'react-hot-toast'
@@ -13,16 +13,19 @@ export default function CategoriesPage() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [form, setForm] = useState({ name: '', priority: 0 })
   const [saving, setSaving] = useState(false)
-  const supabase = createClient()
+  // ⚡ Tạo supabase client 1 lần duy nhất
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => { fetchCategories() }, [])
 
   const fetchCategories = async () => {
+    // ⚡ Chỉ SELECT cột cần thiết
     const { data } = await supabase
       .from('categories')
-      .select('*')
+      .select('id, name, priority')
       .order('priority', { ascending: true })
-    setCategories(data || [])
+    setCategories((data || []) as Category[])
     setLoading(false)
   }
 

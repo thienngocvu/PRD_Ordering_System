@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, use } from 'react'
+import { useEffect, useRef, useState, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Table, CategoryWithProducts, CartItem, Order } from '@/lib/types'
 import Image from 'next/image'
@@ -25,7 +25,9 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
   const [orderSuccess, setOrderSuccess] = useState(false)
   const [loading, setLoading] = useState(true)
   const [itemNotes, setItemNotes] = useState<Record<number, string>>({})
-  const supabase = createClient()
+  // ⚡ Tạo supabase client 1 lần duy nhất, không tái tạo mỗi render
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     if (customerName) {
@@ -34,10 +36,10 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
   }, [customerName])
 
   const fetchData = async () => {
-    // Fetch table info
+    // ⚡ Chỉ SELECT cột cần thiết → giảm bandwidth Supabase (2 GB free/tháng)
     const { data: tableData } = await supabase
       .from('tables')
-      .select('*')
+      .select('id, table_number, status, current_order_id')
       .eq('id', tableId)
       .single()
 
@@ -46,12 +48,12 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
       setLoading(false)
       return
     }
-    setTable(tableData)
+    setTable(tableData as Table)
 
-    // Fetch menu
+    // Fetch menu - chỉ lấy cột cần thiết
     const { data: catData } = await supabase
       .from('categories')
-      .select('*, products(*)')
+      .select('id, name, priority, products(id, name, price, image_url, is_available, category_id)')
       .order('priority')
 
     if (catData) {
@@ -68,10 +70,10 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
     if (tableData.status && tableData.current_order_id) {
       const { data: orderData } = await supabase
         .from('orders')
-        .select('*')
+        .select('id, table_id, customer_name, total_price, status, created_at, updated_at')
         .eq('id', tableData.current_order_id)
         .single()
-      if (orderData) setCurrentOrder(orderData)
+      if (orderData) setCurrentOrder(orderData as Order)
     }
 
     setLoading(false)
@@ -139,7 +141,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
         }
 
         orderId = checkinResult.order_id
-        setCurrentOrder({ id: orderId, table_id: tableId, customer_name: customerName, total_price: 0, status: 'pending', created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as Order)
+        setCurrentOrder({ id: orderId, table_id: tableId, customer_name: customerName, total_price: 0, status: 'serving', created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as Order)
       }
 
       // Add items via server function (validates prices server-side)
@@ -364,7 +366,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowCart(false)} />
           <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl animate-slide-up max-h-[85vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white z-10 px-6 pt-6 pb-4 border-b border-slate-100">
+            <div className="sticky top-0 bg-white z-10 px-6 pt-6 pb-4 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold text-slate-900">Giỏ hàng ({getTotalItems()} món)</h2>
                 <button onClick={() => setShowCart(false)} className="p-2 hover:bg-slate-100 rounded-xl">
@@ -382,7 +384,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
               ) : (
                 <>
                   {cart.map(item => (
-                    <div key={item.product.id} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl">
+                    <div key={item.product.id} className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="flex-1">
                         <p className="font-semibold text-slate-800 text-sm">{item.product.name}</p>
                         <p className="text-orange-600 font-bold text-sm">

@@ -2,7 +2,7 @@
 // Database Types
 // =============================================
 
-export type OrderStatus = "pending" | "completed" | "paid";
+export type OrderStatus = "serving" | "paid";
 
 export interface Table {
   id: number;

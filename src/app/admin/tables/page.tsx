@@ -15,7 +15,9 @@ export default function TablesPage() {
   const [newTableNumber, setNewTableNumber] = useState('')
   const [adding, setAdding] = useState(false)
   const qrCanvasRef = useRef<HTMLCanvasElement>(null)
-  const supabase = createClient()
+  // ⚡ Tạo supabase client 1 lần duy nhất
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     fetchTables()
@@ -34,11 +36,12 @@ export default function TablesPage() {
   }, [showQR])
 
   const fetchTables = async () => {
+    // ⚡ Chỉ SELECT cột cần thiết
     const { data } = await supabase
       .from('tables')
-      .select('*')
+      .select('id, table_number, status')
       .order('table_number', { ascending: true })
-    setTables(data || [])
+    setTables((data || []) as Table[])
     setLoading(false)
   }
 

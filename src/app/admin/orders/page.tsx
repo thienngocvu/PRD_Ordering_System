@@ -1,23 +1,21 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { OrderWithItems, OrderStatus, Table, Product, Category } from '@/lib/types'
 import toast from 'react-hot-toast'
 import {
-  ClipboardList, CreditCard, Check, ChefHat, Eye, X,
+  ClipboardList, CreditCard, ChefHat, Eye, X,
   Plus, Trash2, Minus, Edit3, Search
 } from 'lucide-react'
 
 const statusLabels: Record<OrderStatus, string> = {
-  pending: 'Đang gọi',
-  completed: 'Đã phục vụ',
+  serving: 'Đang phục vụ',
   paid: 'Đã thanh toán',
 }
 
 const statusBadgeClass: Record<OrderStatus, string> = {
-  pending: 'badge-pending',
-  completed: 'badge-completed',
+  serving: 'badge-serving',
   paid: 'badge-paid',
 }
 
@@ -53,32 +51,44 @@ export default function OrdersPage() {
   const supabaseRef = useRef(createClient())
   const supabase = supabaseRef.current
 
+  // ⚡ Debounce fetchOrders để tránh refetch liên tục khi nhiều sự kiện Realtime đến cùng lúc
+  const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedFetchOrders = useCallback(() => {
+    if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current)
+    fetchTimeoutRef.current = setTimeout(() => fetchOrders(), 500)
+  }, [])
+
   useEffect(() => {
     fetchOrders()
 
+    // ⚡ Gộp 2 listeners (orders + order_items) vào 1 channel → tiết kiệm Realtime messages
     const channel = supabase
       .channel('orders-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => fetchOrders())
-      .subscribe((status) => {
-        console.log('[Realtime] orders-page channel:', status)
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => debouncedFetchOrders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => debouncedFetchOrders())
+      .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
-  }, [])
+    return () => {
+      if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current)
+      supabase.removeChannel(channel)
+    }
+  }, [debouncedFetchOrders])
 
   // =========================================
-  // DATA FETCH
+  // DATA FETCH (⚡ Chỉ SELECT cột cần thiết → giảm bandwidth)
   // =========================================
   const fetchOrders = async () => {
     const { data, error } = await supabase
       .from('orders')
       .select(`
-        *,
-        table:tables!orders_table_id_fkey(*),
-        order_items(*, product:products(*))
+        id, table_id, customer_name, total_price, status, created_at,
+        table:tables!orders_table_id_fkey(id, table_number),
+        order_items(id, product_id, quantity, price_at_time, note, status,
+          product:products(id, name, price)
+        )
       `)
       .order('created_at', { ascending: false })
+      .limit(50) // ⚡ Giới hạn 50 đơn mới nhất
     if (error) console.error('[fetchOrders] Error:', error)
     setOrders((data as unknown as OrderWithItems[]) || [])
     setLoading(false)
@@ -86,13 +96,13 @@ export default function OrdersPage() {
 
   const fetchTablesAndProducts = async () => {
     const [tablesRes, productsRes, catsRes] = await Promise.all([
-      supabase.from('tables').select('*').order('table_number'),
-      supabase.from('products').select('*').eq('is_available', true).order('name'),
-      supabase.from('categories').select('*').order('priority'),
+      supabase.from('tables').select('id, table_number, status').order('table_number'),
+      supabase.from('products').select('id, name, price, category_id').eq('is_available', true).order('name'),
+      supabase.from('categories').select('id, name, priority').order('priority'),
     ])
-    setTables(tablesRes.data || [])
-    setProducts(productsRes.data || [])
-    setCategories(catsRes.data || [])
+    setTables((tablesRes.data || []) as Table[])
+    setProducts((productsRes.data || []) as Product[])
+    setCategories((catsRes.data || []) as Category[])
   }
 
   // =========================================
@@ -125,7 +135,8 @@ export default function OrdersPage() {
           table_id: selectedTableId,
           customer_name: customerName || null,
           total_price: totalPrice,
-          status: 'pending' as OrderStatus,
+          status: 'serving' as OrderStatus,
+          created_by: 'admin',
         })
         .select()
         .single()
@@ -367,7 +378,7 @@ export default function OrdersPage() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {(['all', 'pending', 'completed', 'paid'] as const).map(f => (
+        {(['all', 'serving', 'paid'] as const).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -393,11 +404,9 @@ export default function OrdersPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                  order.status === 'pending' ? 'bg-amber-100' :
-                  order.status === 'completed' ? 'bg-emerald-100' : 'bg-blue-100'
+                  order.status === 'serving' ? 'bg-orange-100' : 'bg-blue-100'
                 }`}>
-                  {order.status === 'pending' ? <ChefHat className="w-5 h-5 text-amber-600" /> :
-                   order.status === 'completed' ? <Check className="w-5 h-5 text-emerald-600" /> :
+                  {order.status === 'serving' ? <ChefHat className="w-5 h-5 text-orange-600" /> :
                    <CreditCard className="w-5 h-5 text-blue-600" />}
                 </div>
                 <div>
@@ -423,22 +432,16 @@ export default function OrdersPage() {
                 >
                   <Eye className="w-5 h-5" />
                 </button>
-                {order.status === 'pending' && (
+                {order.status === 'serving' && (
                   <>
                     <button onClick={() => openAddItemsModal(order)} className="p-2 hover:bg-orange-50 rounded-xl text-orange-400" title="Thêm món">
                       <Plus className="w-5 h-5" />
                     </button>
-                    <button onClick={() => updateOrderStatus(order.id, 'completed')} className="btn-success text-sm py-2 px-4 flex items-center gap-1.5">
-                      <Check className="w-4 h-4" />
-                      Đã phục vụ
+                    <button onClick={() => updateOrderStatus(order.id, 'paid')} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5">
+                      <CreditCard className="w-4 h-4" />
+                      Thanh toán
                     </button>
                   </>
-                )}
-                {order.status === 'completed' && (
-                  <button onClick={() => updateOrderStatus(order.id, 'paid')} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5">
-                    <CreditCard className="w-4 h-4" />
-                    Thanh toán
-                  </button>
                 )}
                 <button
                   onClick={() => deleteOrder(order)}
@@ -504,10 +507,10 @@ export default function OrdersPage() {
                     <span className="font-bold text-slate-800">
                       {(item.price_at_time * item.quantity).toLocaleString('vi-VN')}đ
                     </span>
-                    {selectedOrder.status === 'pending' && (
+                    {selectedOrder.status === 'serving' && (
                       <>
                         <button
-                          onClick={() => updateItemStatus(item.id, item.status === 'pending' ? 'done' : 'pending')}
+                          onClick={() => updateItemStatus(item.id, item.status === 'serving' ? 'done' : 'serving')}
                           className={`text-xs px-2 py-1 rounded-lg font-medium ${
                             item.status === 'done'
                               ? 'bg-emerald-100 text-emerald-600'
@@ -538,23 +541,17 @@ export default function OrdersPage() {
             </div>
 
             <div className="flex gap-3 mt-6">
-              {selectedOrder.status === 'pending' && (
+              {selectedOrder.status === 'serving' && (
                 <>
                   <button onClick={() => openAddItemsModal(selectedOrder)} className="flex-1 btn-secondary flex items-center justify-center gap-2">
                     <Plus className="w-5 h-5" />
                     Thêm món
                   </button>
-                  <button onClick={() => { updateOrderStatus(selectedOrder.id, 'completed'); setModalMode(null); setSelectedOrder(null) }} className="flex-1 btn-success flex items-center justify-center gap-2">
-                    <Check className="w-5 h-5" />
-                    Đã phục vụ
+                  <button onClick={() => { updateOrderStatus(selectedOrder.id, 'paid'); setModalMode(null); setSelectedOrder(null) }} className="flex-1 btn-primary flex items-center justify-center gap-2">
+                    <CreditCard className="w-5 h-5" />
+                    Thanh toán
                   </button>
                 </>
-              )}
-              {selectedOrder.status === 'completed' && (
-                <button onClick={() => { updateOrderStatus(selectedOrder.id, 'paid'); setModalMode(null); setSelectedOrder(null) }} className="flex-1 btn-primary flex items-center justify-center gap-2">
-                  <CreditCard className="w-5 h-5" />
-                  Xác nhận thanh toán
-                </button>
               )}
               <button
                 onClick={() => { deleteOrder(selectedOrder) }}
@@ -598,7 +595,7 @@ export default function OrdersPage() {
                     <select
                       value={selectedTableId}
                       onChange={e => setSelectedTableId(Number(e.target.value))}
-                      className="input-field"
+                      className="select-field"
                     >
                       <option value={0}>Chọn bàn...</option>
                       {tables.map(t => (
@@ -690,7 +687,7 @@ export default function OrdersPage() {
                   </h3>
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {cartItems.map(item => (
-                      <div key={item.product.id} className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl">
+                      <div key={item.product.id} className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-slate-800 truncate">{item.product.name}</p>
                           <p className="text-xs text-orange-600 font-bold">{Number(item.product.price).toLocaleString('vi-VN')}đ</p>

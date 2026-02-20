@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Grid3X3, UtensilsCrossed, ClipboardList, DollarSign, TrendingUp } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { Grid3X3, UtensilsCrossed, ClipboardList, DollarSign, Trash2 } from 'lucide-react'
 
 interface DashboardStats {
   totalTables: number
@@ -17,46 +18,66 @@ export default function AdminDashboard() {
     totalTables: 0, activeTables: 0, totalProducts: 0, activeOrders: 0, todayRevenue: 0,
   })
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const [cleaning, setCleaning] = useState(false)
+  // ⚡ Tạo supabase client 1 lần duy nhất
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     fetchStats()
   }, [])
 
   const fetchStats = async () => {
+    // ⚡ Chỉ SELECT cột cần thiết → giảm bandwidth
     const [tablesRes, productsRes, ordersRes, revenueRes] = await Promise.all([
       supabase.from('tables').select('id, status'),
       supabase.from('products').select('id', { count: 'exact', head: true }),
-      supabase.from('orders').select('id, status'),
+      supabase.from('orders').select('id, status').eq('status', 'serving'),
       supabase.from('orders').select('total_price').eq('status', 'paid'),
     ])
 
     const tables = tablesRes.data || []
-    const orders = ordersRes.data || []
+    const activeOrders = ordersRes.data || []
     const paidOrders = revenueRes.data || []
 
     setStats({
       totalTables: tables.length,
       activeTables: tables.filter(t => t.status).length,
       totalProducts: productsRes.count || 0,
-      activeOrders: orders.filter(o => o.status === 'pending' || o.status === 'completed').length,
+      activeOrders: activeOrders.length,
       todayRevenue: paidOrders.reduce((sum, o) => sum + Number(o.total_price), 0),
     })
     setLoading(false)
   }
 
+  // ⚡ Dọn dẹp đơn cũ để giữ DB dưới 500 MB (Supabase Free)
+  const handleCleanup = async () => {
+    if (!confirm('Xóa tất cả đơn hàng đã thanh toán hơn 30 ngày?\nDữ liệu đã xóa không thể khôi phục.')) return
+    setCleaning(true)
+    try {
+      const { data, error } = await supabase.rpc('cleanup_old_orders')
+      if (error) {
+        toast.error('Lỗi dọn dẹp: ' + error.message)
+      } else {
+        const result = data as { orders_deleted: number; items_deleted: number }
+        if (result.orders_deleted === 0) {
+          toast.success('Không có đơn cũ cần dọn dẹp!')
+        } else {
+          toast.success(`Đã xóa ${result.orders_deleted} đơn và ${result.items_deleted} mục cũ!`)
+        }
+        fetchStats()
+      }
+    } catch {
+      toast.error('Có lỗi xảy ra!')
+    }
+    setCleaning(false)
+  }
+
   const statCards = [
     {
-      label: 'Tổng số bàn',
-      value: stats.totalTables,
+      label: 'Bàn hoạt động',
+      value: `${stats.activeTables}/${stats.totalTables}`,
       icon: Grid3X3,
-      color: 'from-blue-500 to-blue-600',
-      shadow: 'shadow-blue-500/25',
-    },
-    {
-      label: 'Bàn đang phục vụ',
-      value: stats.activeTables,
-      icon: TrendingUp,
       color: 'from-emerald-500 to-emerald-600',
       shadow: 'shadow-emerald-500/25',
     },
@@ -68,7 +89,7 @@ export default function AdminDashboard() {
       shadow: 'shadow-orange-500/25',
     },
     {
-      label: 'Đơn đang xử lý',
+      label: 'Đơn đang phục vụ',
       value: stats.activeOrders,
       icon: ClipboardList,
       color: 'from-purple-500 to-purple-600',
@@ -118,6 +139,34 @@ export default function AdminDashboard() {
           </div>
         ))}
       </div>
+
+      {/* ⚡ Database Cleanup Section */}
+      <div className="mt-8 card p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Trash2 className="w-4 h-4 text-slate-400" />
+              Bảo trì dữ liệu
+            </h3>
+            <p className="text-sm text-slate-400 mt-0.5">
+              Xóa đơn hàng đã thanh toán trên 30 ngày để tiết kiệm dung lượng
+            </p>
+          </div>
+          <button
+            onClick={handleCleanup}
+            disabled={cleaning}
+            className="btn-secondary text-sm py-2 px-4 flex items-center gap-2 w-fit"
+          >
+            {cleaning ? (
+              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            {cleaning ? 'Đang dọn...' : 'Dọn dẹp dữ liệu cũ'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
+

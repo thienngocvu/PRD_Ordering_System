@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { compressImage } from '@/lib/compress-image'
 import type { Product, Category } from '@/lib/types'
 import toast from 'react-hot-toast'
 import Image from 'next/image'
@@ -19,19 +20,22 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState(0)
-  const supabase = createClient()
+  // ⚡ Tạo supabase client 1 lần duy nhất
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   useEffect(() => {
     fetchData()
   }, [])
 
   const fetchData = async () => {
+    // ⚡ Chỉ SELECT cột cần thiết thay vì SELECT * → tiết kiệm bandwidth Supabase
     const [productsRes, categoriesRes] = await Promise.all([
-      supabase.from('products').select('*').order('name'),
-      supabase.from('categories').select('*').order('priority'),
+      supabase.from('products').select('id, name, price, category_id, is_available, image_url').order('name'),
+      supabase.from('categories').select('id, name, priority').order('priority'),
     ])
-    setProducts(productsRes.data || [])
-    setCategories(categoriesRes.data || [])
+    setProducts((productsRes.data || []) as Product[])
+    setCategories((categoriesRes.data || []) as Category[])
     setLoading(false)
   }
 
@@ -60,17 +64,26 @@ export default function ProductsPage() {
   }
 
   const uploadImage = async (file: File): Promise<string | null> => {
-    const ext = file.name.split('.').pop()
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`
-    const { error } = await supabase.storage
-      .from('product-images')
-      .upload(fileName, file)
-    if (error) {
-      toast.error('Lỗi upload ảnh!')
+    try {
+      // ⚡ Nén ảnh trước khi upload → tiết kiệm Supabase Storage (1 GB free)
+      const compressedFile = await compressImage(file)
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`
+      const { error } = await supabase.storage
+        .from('product-images')
+        .upload(fileName, compressedFile, {
+          cacheControl: '31536000', // Cache 1 năm - giảm bandwidth
+          contentType: 'image/jpeg',
+        })
+      if (error) {
+        toast.error('Lỗi upload ảnh!')
+        return null
+      }
+      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName)
+      return urlData.publicUrl
+    } catch {
+      toast.error('Lỗi xử lý ảnh!')
       return null
     }
-    const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(fileName)
-    return urlData.publicUrl
   }
 
   const handleSave = async () => {
@@ -164,7 +177,7 @@ export default function ProductsPage() {
         <select
           value={filterCategory}
           onChange={e => setFilterCategory(Number(e.target.value))}
-          className="input-field w-full sm:w-48"
+          className="select-field w-full sm:w-48"
         >
           <option value={0}>Tất cả danh mục</option>
           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -255,7 +268,7 @@ export default function ProductsPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Danh mục</label>
-                <select value={form.category_id} onChange={e => setForm({ ...form, category_id: Number(e.target.value) })} className="input-field">
+                <select value={form.category_id} onChange={e => setForm({ ...form, category_id: Number(e.target.value) })} className="select-field">
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>

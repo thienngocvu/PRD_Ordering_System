@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { UtensilsCrossed, LogIn, Eye, EyeOff } from 'lucide-react'
@@ -12,7 +12,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
+  // ⚡ Tạo supabase client 1 lần duy nhất
+  const supabaseRef = useRef(createClient())
+  const supabase = supabaseRef.current
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
