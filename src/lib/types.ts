@@ -66,6 +66,28 @@ export interface CategoryWithProducts extends Category {
 }
 
 // =============================================
+// Settings Types
+// =============================================
+
+export interface AppSetting {
+  id: number;
+  key: string;
+  value: string | null;
+  label: string | null;
+  description: string | null;
+  updated_at: string;
+}
+
+// Typed map for easy access
+export interface AppSettings {
+  restaurant_name: string;
+  qr_subtitle: string;
+  wifi_name: string;
+  wifi_password: string;
+  qr_footer_note: string;
+}
+
+// =============================================
 // Cart Types (Client-side)
 // =============================================
 

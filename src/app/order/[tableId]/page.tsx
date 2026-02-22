@@ -462,10 +462,11 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
           supabase.removeChannel(staffChannel)
           toast.success('Đã gọi nhân viên! Vui lòng đợi...', { icon: '🔔', duration: 5000 })
         }}
-        className="fixed bottom-6 right-6 w-14 h-14 bg-blue-500 hover:bg-blue-600 text-white rounded-full shadow-xl shadow-blue-500/30 flex items-center justify-center transition-all active:scale-90 z-20"
+        className="fixed bottom-6 right-4 flex items-center gap-2 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white px-4 py-3 rounded-2xl shadow-xl shadow-blue-500/30 transition-all active:scale-95 z-20"
         title="Gọi nhân viên"
       >
-        <Bell className="w-6 h-6" />
+        <Bell className="w-5 h-5 flex-shrink-0" />
+        <span className="font-semibold text-sm whitespace-nowrap">Gọi nhân viên</span>
       </button>
     </main>
   )
