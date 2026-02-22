@@ -6,15 +6,17 @@ import type { OrderWithItems, OrderStatus, Table, Product, Category } from '@/li
 import toast from 'react-hot-toast'
 import {
   ClipboardList, CreditCard, ChefHat, Eye, X,
-  Plus, Trash2, Minus, Edit3, Search
+  Plus, Trash2, Minus, Edit3, Search, Calendar, CheckCircle
 } from 'lucide-react'
 
 const statusLabels: Record<OrderStatus, string> = {
+  booking: 'Đặt bàn',
   serving: 'Đang phục vụ',
   paid: 'Đã thanh toán',
 }
 
 const statusBadgeClass: Record<OrderStatus, string> = {
+  booking: 'badge-booking',
   serving: 'badge-serving',
   paid: 'badge-paid',
 }
@@ -81,7 +83,7 @@ export default function OrdersPage() {
     const { data, error } = await supabase
       .from('orders')
       .select(`
-        id, table_id, customer_name, total_price, status, created_at,
+        id, table_id, customer_name, customer_phone, total_price, status, created_at,
         table:tables!orders_table_id_fkey(id, table_number),
         order_items(id, product_id, quantity, price_at_time, note, status,
           product:products(id, name, price)
@@ -378,7 +380,7 @@ export default function OrdersPage() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {(['all', 'serving', 'paid'] as const).map(f => (
+        {(['all', 'booking', 'serving', 'paid'] as const).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -404,9 +406,11 @@ export default function OrdersPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  order.status === 'booking' ? 'bg-purple-100' :
                   order.status === 'serving' ? 'bg-orange-100' : 'bg-blue-100'
                 }`}>
-                  {order.status === 'serving' ? <ChefHat className="w-5 h-5 text-orange-600" /> :
+                  {order.status === 'booking' ? <Calendar className="w-5 h-5 text-purple-600" /> :
+                   order.status === 'serving' ? <ChefHat className="w-5 h-5 text-orange-600" /> :
                    <CreditCard className="w-5 h-5 text-blue-600" />}
                 </div>
                 <div>
@@ -415,7 +419,7 @@ export default function OrdersPage() {
                     <span className={statusBadgeClass[order.status]}>{statusLabels[order.status]}</span>
                   </div>
                   <p className="text-sm text-slate-400">
-                    {order.customer_name && <span className="text-slate-600 font-medium">{order.customer_name} · </span>}
+                    {order.customer_name && <span className="text-slate-600 font-medium">{order.customer_name} {order.customer_phone && `- ${order.customer_phone}`} · </span>}
                     {new Date(order.created_at).toLocaleString('vi-VN')} · {order.order_items.length} món
                   </p>
                 </div>
@@ -443,13 +447,31 @@ export default function OrdersPage() {
                     </button>
                   </>
                 )}
-                <button
-                  onClick={() => deleteOrder(order)}
-                  className="p-2 hover:bg-red-50 rounded-xl text-slate-300 hover:text-red-500 transition-colors"
-                  title="Xóa đơn"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+                {order.status === 'booking' && (
+                  <>
+                    <button onClick={() => updateOrderStatus(order.id, 'serving')} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 shadow-purple-500/25">
+                      <CheckCircle className="w-4 h-4" />
+                      Nhận bàn
+                    </button>
+                    <button
+                      onClick={() => deleteOrder(order)}
+                      className="btn-danger text-sm py-2 px-3 flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 shadow-none hover:shadow-none transition-colors border border-red-200"
+                      title="Hủy đặt bàn"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Hủy đặt
+                    </button>
+                  </>
+                )}
+                {order.status !== 'booking' && (
+                  <button
+                    onClick={() => deleteOrder(order)}
+                    className="p-2 hover:bg-red-50 rounded-xl text-slate-300 hover:text-red-500 transition-colors"
+                    title="Xóa đơn"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -486,7 +508,9 @@ export default function OrdersPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Chi tiết đơn hàng</h2>
-                <p className="text-sm text-slate-400">{selectedOrder.table?.table_number} · {selectedOrder.customer_name || 'Khách'}</p>
+                <p className="text-sm text-slate-400">
+                  {selectedOrder.table?.table_number} · {selectedOrder.customer_name || 'Khách'} {selectedOrder.customer_phone && `(${selectedOrder.customer_phone})`}
+                </p>
               </div>
               <button onClick={() => { setModalMode(null); setSelectedOrder(null) }} className="p-1.5 hover:bg-slate-100 rounded-lg">
                 <X className="w-5 h-5 text-slate-500" />
@@ -541,6 +565,12 @@ export default function OrdersPage() {
             </div>
 
             <div className="flex gap-3 mt-6">
+              {selectedOrder.status === 'booking' && (
+                <button onClick={() => { updateOrderStatus(selectedOrder.id, 'serving'); setModalMode(null); setSelectedOrder(null) }} className="flex-1 btn-primary flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 shadow-purple-500/25">
+                  <CheckCircle className="w-5 h-5" />
+                  Nhận bàn
+                </button>
+              )}
               {selectedOrder.status === 'serving' && (
                 <>
                   <button onClick={() => openAddItemsModal(selectedOrder)} className="flex-1 btn-secondary flex items-center justify-center gap-2">
@@ -578,7 +608,7 @@ export default function OrdersPage() {
                   {modalMode === 'create' ? 'Tạo đơn hàng mới' : `Thêm món — ${selectedOrder?.table?.table_number}`}
                 </h2>
                 {modalMode === 'add-items' && selectedOrder && (
-                  <p className="text-sm text-slate-400 mt-0.5">Khách: {selectedOrder.customer_name || 'Không tên'}</p>
+                  <p className="text-sm text-slate-400 mt-0.5">Xác nhận đơn cho {selectedOrder.customer_name || 'Khách'}</p>
                 )}
               </div>
               <button onClick={() => { setModalMode(null); setSelectedOrder(null) }} className="p-1.5 hover:bg-slate-100 rounded-lg">

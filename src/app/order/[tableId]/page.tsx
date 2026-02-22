@@ -18,6 +18,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
   const [cart, setCart] = useState<CartItem[]>([])
   const [showCart, setShowCart] = useState(false)
   const [customerName, setCustomerName] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
   const [showNameModal, setShowNameModal] = useState(true)
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null)
   const [activeCategory, setActiveCategory] = useState(0)
@@ -30,10 +31,33 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
   const supabase = supabaseRef.current
 
   useEffect(() => {
-    if (customerName) {
+    // Try to get from URL params first (redirected from booking page)
+    const params = new URLSearchParams(window.location.search)
+    const qName = params.get('name')
+    const qPhone = params.get('phone')
+    
+    // Fallback to localStorage
+    const storedName = localStorage.getItem(`booking_name_${tableId}`)
+    const storedPhone = localStorage.getItem(`booking_phone_${tableId}`)
+    
+    // finalPhone can be empty
+    const finalName = qName || storedName || ''
+    const finalPhone = qPhone || storedPhone || ''
+    
+    if (finalName) {
+      setCustomerName(finalName)
+      setCustomerPhone(finalPhone)
+      setShowNameModal(false)
+      localStorage.removeItem(`booking_name_${tableId}`)
+      localStorage.removeItem(`booking_phone_${tableId}`)
+    }
+  }, [tableId])
+
+  useEffect(() => {
+    if (!showNameModal && customerName) {
       fetchData()
     }
-  }, [customerName])
+  }, [showNameModal, customerName])
 
   const fetchData = async () => {
     // ⚡ Chỉ SELECT cột cần thiết → giảm bandwidth Supabase (2 GB free/tháng)
@@ -132,6 +156,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
           .rpc('checkin_and_create_order', {
             p_table_id: tableId,
             p_customer_name: customerName,
+            p_customer_phone: customerPhone,
           })
 
         if (checkinError || !checkinResult || checkinResult.error) {
@@ -195,13 +220,20 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
               placeholder="Nhập tên của bạn..."
               value={customerName}
               onChange={e => setCustomerName(e.target.value)}
+              className="input-field mb-3 text-center text-lg"
+              autoFocus
+            />
+            <input
+              type="tel"
+              placeholder="Nhập số điện thoại (Không bắt buộc)..."
+              value={customerPhone}
+              onChange={e => setCustomerPhone(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && customerName.trim()) {
                   setShowNameModal(false)
                 }
               }}
               className="input-field mb-4 text-center text-lg"
-              autoFocus
             />
             <button
               onClick={() => { if (customerName.trim()) setShowNameModal(false) }}
@@ -243,7 +275,9 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
         <div className="max-w-lg mx-auto flex items-center justify-between">
           <div>
             <h1 className="font-bold text-slate-900">{table.table_number}</h1>
-            <p className="text-xs text-slate-400">Xin chào, {customerName}! 👋</p>
+            <p className="text-xs text-slate-400">
+              Xin chào, {customerName}! 👋 {customerPhone && `(${customerPhone})`}
+            </p>
           </div>
           <button
             onClick={() => setShowCart(true)}
@@ -457,6 +491,7 @@ export default function OrderPage({ params }: { params: Promise<{ tableId: strin
             payload: {
               tableName: table?.table_number || `Bàn #${tableId}`,
               customerName: customerName,
+              customerPhone: customerPhone,
             },
           })
           supabase.removeChannel(staffChannel)

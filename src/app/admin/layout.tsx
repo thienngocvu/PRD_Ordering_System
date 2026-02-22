@@ -106,8 +106,12 @@ export default function AdminLayout({
         const data = payload.payload as {
           tableName?: string;
           customerName?: string;
+          customerPhone?: string;
         };
-        const message = `${data.tableName || "Có bàn"} đang gọi nhân viên!${data.customerName ? ` (${data.customerName})` : ""}`;
+        const contactInfo = data.customerName 
+          ? ` (${data.customerName}${data.customerPhone ? ` - ${data.customerPhone}` : ""})` 
+          : "";
+        const message = `${data.tableName || "Có bàn"} đang gọi nhân viên!${contactInfo}`;
         addNotification(message, "staff-call");
         toast(`🔔 ${message}`, {
           duration: 8000,

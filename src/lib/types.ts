@@ -2,7 +2,7 @@
 // Database Types
 // =============================================
 
-export type OrderStatus = "serving" | "paid";
+export type OrderStatus = "serving" | "paid" | "booking";
 
 export interface Table {
   id: number;
@@ -25,6 +25,7 @@ export interface Product {
   category_id: number;
   name: string;
   price: number;
+  cost_price: number;
   image_url: string | null;
   is_available: boolean;
   created_at: string;
@@ -35,6 +36,7 @@ export interface Order {
   id: string;
   table_id: number;
   customer_name: string | null;
+  customer_phone: string | null;
   total_price: number;
   status: OrderStatus;
   created_at: string;
@@ -47,6 +49,7 @@ export interface OrderItem {
   product_id: number;
   quantity: number;
   price_at_time: number;
+  cost_price_at_time: number;
   note: string | null;
   status: string;
   created_at: string;

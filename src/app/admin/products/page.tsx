@@ -14,7 +14,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-  const [form, setForm] = useState({ name: '', price: '', category_id: 0, is_available: true })
+  const [form, setForm] = useState({ name: '', price: '', cost_price: '', category_id: 0, is_available: true })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -31,7 +31,7 @@ export default function ProductsPage() {
   const fetchData = async () => {
     // ⚡ Chỉ SELECT cột cần thiết thay vì SELECT * → tiết kiệm bandwidth Supabase
     const [productsRes, categoriesRes] = await Promise.all([
-      supabase.from('products').select('id, name, price, category_id, is_available, image_url').order('name'),
+      supabase.from('products').select('id, name, price, cost_price, category_id, is_available, image_url').order('name'),
       supabase.from('categories').select('id, name, priority').order('priority'),
     ])
     setProducts((productsRes.data || []) as Product[])
@@ -41,7 +41,7 @@ export default function ProductsPage() {
 
   const openAdd = () => {
     setEditingProduct(null)
-    setForm({ name: '', price: '', category_id: categories[0]?.id || 0, is_available: true })
+    setForm({ name: '', price: '', cost_price: '', category_id: categories[0]?.id || 0, is_available: true })
     setImageFile(null)
     setImagePreview(null)
     setShowModal(true)
@@ -49,7 +49,7 @@ export default function ProductsPage() {
 
   const openEdit = (p: Product) => {
     setEditingProduct(p)
-    setForm({ name: p.name, price: String(p.price), category_id: p.category_id, is_available: p.is_available })
+    setForm({ name: p.name, price: String(p.price), cost_price: String(p.cost_price || 0), category_id: p.category_id, is_available: p.is_available })
     setImageFile(null)
     setImagePreview(p.image_url)
     setShowModal(true)
@@ -100,6 +100,7 @@ export default function ProductsPage() {
     const productData = {
       name: form.name.trim(),
       price: parseFloat(form.price),
+      cost_price: parseFloat(form.cost_price || '0'),
       category_id: form.category_id,
       is_available: form.is_available,
       image_url: imageUrl,
@@ -205,7 +206,12 @@ export default function ProductsPage() {
             <div className="p-4">
               <p className="text-xs text-orange-500 font-semibold mb-1">{getCategoryName(product.category_id)}</p>
               <h3 className="font-bold text-slate-800 mb-1">{product.name}</h3>
-              <p className="text-lg font-bold text-orange-600">{Number(product.price).toLocaleString('vi-VN')}đ</p>
+              <p className="text-sm font-semibold text-slate-600 mb-1">
+                Giá bán: <span className="text-orange-600 text-lg">{Number(product.price).toLocaleString('vi-VN')}đ</span>
+              </p>
+              <p className="text-xs font-semibold text-slate-500">
+                Giá cost: {Number(product.cost_price || 0).toLocaleString('vi-VN')}đ
+              </p>
               <div className="flex items-center gap-2 mt-3">
                 <button onClick={() => toggleAvailability(product)} className={`flex-1 text-xs py-1.5 rounded-lg font-medium transition-colors ${product.is_available ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-amber-50 text-amber-600 hover:bg-amber-100'}`}>
                   {product.is_available ? 'Còn hàng' : 'Bật lại'}
@@ -263,8 +269,12 @@ export default function ProductsPage() {
                 <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Ví dụ: Phở bò, Cơm gà..." className="input-field" autoFocus />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Giá (VNĐ)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Giá bán (VNĐ)</label>
                 <input type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="50000" className="input-field" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Giá cost (VNĐ)</label>
+                <input type="number" value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} placeholder="30000" className="input-field" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Danh mục</label>
